@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+    web:
+        build: .
+        environment:
+          - ConnectionStrings__EmailApiContext=Server=db;Database=Marketing;User Id=sa;Password=SecretPass123;MultipleActiveResultSets=True;TrustServerCertificate=true;
+        ports:
+            - "8000:80"
+        depends_on:
+            - db
+    db:
+        build: docker-mssql

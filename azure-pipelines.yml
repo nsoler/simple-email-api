@@ -1,0 +1,131 @@
+trigger:
+  branches:
+    include:
+    - main
+
+resources:
+  repositories:
+  - repository: baseTemplate
+    type: git
+    name: 'Q5 Identity/q5id-pipelines'
+    ref: refs/heads/base/v1
+
+extends:
+  template: general/base.yml@baseTemplate
+  parameters:
+    stages:
+    - stage: buildandpush
+      pool:
+        vmImage: ubuntu-latest
+      jobs:
+      - job: buildandpush
+        displayName: 'Build Docker Container'
+        steps:
+        - task: Docker@2
+          displayName: Build Docker image
+          inputs:
+            containerRegistry: 'q5idcontainers-2053'
+            repository: 'q5id/platform/email-api'
+            command: 'build'
+            Dockerfile: 'Dockerfile'
+            buildContext: '.'
+            tags: |
+              latest
+              $(Build.BuildId)
+              $(Build.SourceVersion)
+        - task: Docker@2
+          displayName: Push Docker image to Azure Container Registry
+          inputs:
+            containerRegistry: 'q5idcontainers-2053'
+            repository: 'q5id/platform/email-api'
+            command: 'push'
+            tags: |
+              latest
+              $(Build.BuildId)
+              $(Build.SourceVersion)
+    - stage: deployDev
+      displayName: 'Deploy to DEV'
+      dependsOn: buildandpush
+      pool:
+        vmImage: 'Ubuntu-latest'
+      jobs:
+      - job: deploymentDev
+        displayName: 'Deploy Email API'
+        steps:
+        - task: AzureRmWebAppDeployment@4
+          displayName: 'Deploy email API to DevTest'
+          inputs:
+            ConnectionType: 'AzureRM'
+            azureSubscription: 'Q5id Development Azure Subscription'
+            appType: 'webAppContainer'
+            WebAppName: 'q5id-app-email-devtest-westus2'
+            DockerNamespace: 'q5idcontainers.azurecr.io'
+            DockerRepository: 'q5id/platform/email-api'
+            DockerImageTag: '$(Build.SourceVersion)'
+    - stage: deployProd
+      displayName: 'Deploy to PROD'
+      dependsOn: deployDev
+      pool:
+        vmImage: 'Ubuntu-latest'
+      jobs:
+      - deployment: deploymentProd
+        displayName: 'Deploy Email API'
+        environment: PROD
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+              - task: AzureRmWebAppDeployment@4
+                displayName: 'Deploy email API to Prod'
+                inputs:
+                  ConnectionType: 'AzureRM'
+                  azureSubscription: 'Q5id Production Azure Subscription'
+                  appType: 'webAppContainer'
+                  WebAppName: 'q5id-app-email-prod-westus2'
+                  DockerNamespace: 'q5idcontainers.azurecr.io'
+                  DockerRepository: 'q5id/platform/email-api'
+                  DockerImageTag: '$(Build.SourceVersion)'
+              # - task: AzureRmWebAppDeployment@4
+              #   displayName: 'Deploy email API to Prod'
+              #   inputs:
+              #     ConnectionType: 'AzureRM'
+              #     azureSubscription: 'Q5id Production Azure Subscription'
+              #     appType: 'webAppContainer'
+              #     ResourceGroupName: 'q5id-platform-apis-prod-westus2'
+              #     WebAppName: 'q5id-app-email-prod-westus2'
+              #     deployToSlotOrASE: true
+              #     SlotName: 'q5id-platform-apis-prod-westus2-secondary'
+              #     DockerNamespace: 'q5idcontainers.azurecr.io'
+              #     DockerRepository: 'q5id/platform/email-api'
+              #     DockerImageTag: '$(Build.SourceVersion)'
+              # - task: AzureAppServiceManage@0
+              #   displayName: 'Swap Slots'
+              #   inputs:
+              #     azureSubscription: 'Q5id Production Azure Subscription'
+              #     WebAppName: 'q5id-app-email-prod-westus2'
+              #     ResourceGroupName: 'q5id-platform-apis-prod-westus2'
+              #     SourceSlot: 'q5id-platform-apis-prod-westus2-secondary'
+
+#- ${{ if eq(parameters.useDeploymentSlot, true) }}:
+#- task: AzureRmWebAppDeployment@4
+#  displayName: 'Deploy ${{ parameters.serviceIdentifier }} API to $(Service.DeploymentSlotName) in $(${{ parameters.regionVarName }})'
+#  inputs:
+#    azureSubscription: $(${{ parameters.subscriptionVarName }})
+#    appType: webAppContainer
+#    WebAppName: '$(scriptOutput.appName)'
+#    deployToSlotOrASE: true
+#    ResourceGroupName: 'q5id-platform-apis-$(Environment)-$(${{ parameters.regionVarName }})'
+#    SlotName: '$(Service.DeploymentSlotName)'
+#    DockerNamespace: '$(Container.Registry)'
+#    DockerRepository: '${{ parameters.containerImage }}'
+#    DockerImageTag: '$(resources.pipeline.apiCi.sourceCommit)'
+
+#- ${{ if eq(parameters.useDeploymentSlot, true) }}:
+#- task: AzureAppServiceManage@0
+#  displayName: 'Swap Slots: ${{ parameters.serviceIdentifier }} API to $(Service.DeploymentSlotName)'
+#  inputs:
+#    azureSubscription: $(${{ parameters.subscriptionVarName }})
+#    WebAppName: '$(scriptOutput.appName)'
+#    ResourceGroupName: 'q5id-platform-apis-$(Environment)-$(${{ parameters.regionVarName }})'
+#    SourceSlot: '$(Service.DeploymentSlotName)'
+
